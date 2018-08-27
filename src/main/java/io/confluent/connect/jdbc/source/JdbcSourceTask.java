@@ -16,6 +16,7 @@
 
 package io.confluent.connect.jdbc.source;
 
+import io.confluent.connect.jdbc.util.ParseUtil;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.common.utils.SystemTime;
@@ -125,24 +126,25 @@ public class JdbcSourceTask extends SourceTask {
         = config.getBoolean(JdbcSourceTaskConfig.VALIDATE_NON_NULL_CONFIG);
 
     for (String tableOrQuery : tablesOrQuery) {
+      String parsedIncrementingColumn = incrementingColumn;
+      String parsedTimestampColumn = timestampColumn;
+
       final Map<String, String> partition;
       switch (queryMode) {
         case TABLE:
+          parsedIncrementingColumn = parseColumn(parsedIncrementingColumn, tableOrQuery);
+          parsedTimestampColumn = parseColumn(parsedTimestampColumn, tableOrQuery);
           if (validateNonNulls) {
             validateNonNullable(
-                mode,
-                schemaPattern,
-                tableOrQuery,
-                incrementingColumn,
-                timestampColumn
+              mode,  schemaPattern, tableOrQuery,
+              parsedIncrementingColumn,
+              parsedTimestampColumn
             );
           }
-          partition = Collections.singletonMap(
-              JdbcSourceConnectorConstants.TABLE_NAME_KEY, tableOrQuery);
+          partition = Collections.singletonMap(JdbcSourceConnectorConstants.TABLE_NAME_KEY, tableOrQuery);
           break;
         case QUERY:
-          partition = Collections.singletonMap(JdbcSourceConnectorConstants.QUERY_NAME_KEY,
-                                               JdbcSourceConnectorConstants.QUERY_NAME_VALUE);
+          partition = Collections.singletonMap(JdbcSourceConnectorConstants.QUERY_NAME_KEY, JdbcSourceConnectorConstants.QUERY_NAME_VALUE);
           break;
         default:
           throw new ConnectException("Unexpected query mode: " + queryMode);
@@ -157,20 +159,27 @@ public class JdbcSourceTask extends SourceTask {
                 topicPrefix, mapNumerics));
       } else if (mode.equals(JdbcSourceTaskConfig.MODE_INCREMENTING)) {
         tableQueue.add(new TimestampIncrementingTableQuerier(
-            queryMode, tableOrQuery, topicPrefix, null, incrementingColumn, offset,
+                queryMode, tableOrQuery, topicPrefix, null, parsedIncrementingColumn, offset,
                 timestampDelayInterval, schemaPattern, mapNumerics));
       } else if (mode.equals(JdbcSourceTaskConfig.MODE_TIMESTAMP)) {
         tableQueue.add(new TimestampIncrementingTableQuerier(
-            queryMode, tableOrQuery, topicPrefix, timestampColumn, null, offset,
+                queryMode, tableOrQuery, topicPrefix, parsedTimestampColumn, null, offset,
                 timestampDelayInterval, schemaPattern, mapNumerics));
       } else if (mode.endsWith(JdbcSourceTaskConfig.MODE_TIMESTAMP_INCREMENTING)) {
         tableQueue.add(new TimestampIncrementingTableQuerier(
-            queryMode, tableOrQuery, topicPrefix, timestampColumn, incrementingColumn,
+                queryMode, tableOrQuery, topicPrefix, parsedTimestampColumn, parsedIncrementingColumn,
                 offset, timestampDelayInterval, schemaPattern, mapNumerics));
       }
     }
 
     stop = new AtomicBoolean(false);
+  }
+
+  private String parseColumn(String column, String table) {
+    return ParseUtil.parse(column)
+//            .withSchema(schema)  // TODO: IMPLEMENT ME
+            .withTable(table)
+            .process();
   }
 
   private void createConnectionProvider() {
